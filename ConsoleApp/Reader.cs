@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Text;
 using ReaderB;
 
 namespace ConsoleApp
@@ -24,6 +20,8 @@ namespace ConsoleApp
                 {
                     Console.WriteLine($"Successfully connected to RFID reader at {IP_ADDRESS}:{PORT}");
                     Console.WriteLine($"Handle: {frmHandle}, Address: 0x{comAddr:X2}");
+
+                    SetScanTime();
 
                     return true;
                 }
@@ -64,6 +62,27 @@ namespace ConsoleApp
                 {
                     frmHandle = -1;
                 }
+            }
+        }
+
+        public void SetScanTime(byte scanTime = 50)
+        {
+            try
+            {
+                int result = StaticClassReaderB.WriteScanTime(ref comAddr, ref scanTime, frmHandle);
+
+                if (result == 0)
+                {
+                    Console.WriteLine($"Scan time set to: {scanTime} * 100ms");
+                }
+                else
+                {
+                    Console.WriteLine("Could not set scan time");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Note: Could not set scan time: {ex.Message}");
             }
         }
 
@@ -289,8 +308,6 @@ namespace ConsoleApp
             Console.WriteLine("Reader is in Answer Mode - tags will only be read when triggered");
             Console.WriteLine("Press SPACE to trigger tag reading, 'q' to quit\n");
 
-            var seenTags = new HashSet<string>();
-
             while (true)
             {
                 ConsoleKeyInfo keyInfo = Console.ReadKey(true);
@@ -336,15 +353,7 @@ namespace ConsoleApp
 
                                             string tagEpc = epcStr.ToString();
 
-                                            if (!seenTags.Contains(tagEpc))
-                                            {
-                                                seenTags.Add(tagEpc);
-                                                Console.WriteLine($"  NEW TAG: {tagEpc}");
-                                            }
-                                            else
-                                            {
-                                                Console.WriteLine($"  EXISTING: {tagEpc}");
-                                            }
+                                            Console.WriteLine($"  TAG: {tagEpc}");
 
                                             offset += epcLen;
                                         }
@@ -384,18 +393,6 @@ namespace ConsoleApp
                 return;
             }
 
-            // Temporarily increase scan time for better real-time performance
-            try
-            {
-                byte scanTime = 20; // 20 * 100ms = 2 seconds
-                StaticClassReaderB.WriteScanTime(ref comAddr, ref scanTime, frmHandle);
-                Console.WriteLine("Optimized scan time for real-time reading");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Note: Could not optimize scan time: {ex.Message}");
-            }
-
             Console.WriteLine("\n=== Real-time Tag Reading Started ===");
             Console.WriteLine("Press 'q' and Enter to stop real-time reading...");
             Console.WriteLine("Scanning interval: 300ms\n");
@@ -403,6 +400,7 @@ namespace ConsoleApp
             var seenTags = new HashSet<string>();
             var cancellationToken = new CancellationTokenSource();
             bool stopRequested = false;
+            int interval = 300;
 
             // Start background scanning
             var scanTask = Task.Run(async () =>
@@ -468,13 +466,13 @@ namespace ConsoleApp
                         }
 
                         // Clear seen tags every 30 seconds to detect re-entered tags
-                        if (DateTime.Now.Second % 30 == 0 && seenTags.Count > 0)
-                        {
-                            seenTags.Clear();
-                            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Tag cache cleared");
-                        }
+                        //if (DateTime.Now.Second % 30 == 0 && seenTags.Count > 0)
+                        //{
+                        //    seenTags.Clear();
+                        //    Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Tag cache cleared");
+                        //}
 
-                        await Task.Delay(300);
+                        await Task.Delay(interval);
                     }
                     catch (Exception ex)
                     {
@@ -497,18 +495,6 @@ namespace ConsoleApp
 
             Console.WriteLine("\nStopping real-time scanning...");
             scanTask.Wait(5000); // Wait up to 5 seconds for clean shutdown
-
-            // Restore original scan time
-            try
-            {
-                byte scanTime = 10; // Restore to 10 * 100ms = 1 second default
-                StaticClassReaderB.WriteScanTime(ref comAddr, ref scanTime, frmHandle);
-                Console.WriteLine("Restored original scan time");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Note: Could not restore scan time: {ex.Message}");
-            }
 
             Console.WriteLine("Real-time scanning stopped.\n");
         }
