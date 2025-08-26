@@ -306,7 +306,10 @@ namespace ConsoleApp
 
             Console.WriteLine("\n=== Trigger-Based Tag Reading ===");
             Console.WriteLine("Reader is in Answer Mode - tags will only be read when triggered");
-            Console.WriteLine("Press SPACE to trigger tag reading, 'q' to quit\n");
+            Console.WriteLine("Press SPACE to trigger tag reading, 'q' to quit, 's' to stop current scan\n");
+
+            var scannedTags = new HashSet<string>();
+            var scanStats = new Dictionary<int, int>(); // tagCount -> frequency
 
             while (true)
             {
@@ -323,52 +326,135 @@ namespace ConsoleApp
 
                     try
                     {
-                        byte[] epcData = new byte[1000];
-                        int totalLen = 0;
-                        int cardNum = 0;
+                        var allTagsFound = new HashSet<string>();
+                        scanStats.Clear(); // Reset statistics for new scan
+                        int attemptDelay = 200;
+                        int attempt = 1;
+                        bool stopScan = false;
 
-                        int result = StaticClassReaderB.Inventory_G2(ref comAddr, 0, 0, 0, epcData, ref totalLen, ref cardNum, frmHandle);
+                        Console.WriteLine("Scanning started... Press 's' to stop scanning");
 
-                        if (result == 0 || result == 0x01 || result == 0x02 || result == 0x03)
+                        while (!stopScan)
                         {
-                            if (cardNum > 0)
+                            byte[] epcData = new byte[1000];
+                            int totalLen = 0;
+                            int cardNum = 0;
+
+                            int result = StaticClassReaderB.Inventory_G2(ref comAddr, 0, 0, 0, epcData, ref totalLen, ref cardNum, frmHandle);
+
+                            if (result == 0 || result == 0x01 || result == 0x02 || result == 0x03)
                             {
-                                Console.WriteLine($"Found {cardNum} tag(s):");
-
-                                int offset = 0;
-                                for (int i = 0; i < cardNum; i++)
+                                if (cardNum > 0)
                                 {
-                                    if (offset < totalLen)
+                                    int offset = 0;
+                                    for (int i = 0; i < cardNum; i++)
                                     {
-                                        int epcLen = epcData[offset];
-                                        offset++;
-
-                                        if (offset + epcLen <= totalLen)
+                                        if (offset < totalLen)
                                         {
-                                            StringBuilder epcStr = new StringBuilder();
-                                            for (int j = 0; j < epcLen; j++)
+                                            int epcLen = epcData[offset];
+                                            offset++;
+
+                                            if (offset + epcLen <= totalLen)
                                             {
-                                                epcStr.Append($"{epcData[offset + j]:X2}");
+                                                StringBuilder epcStr = new StringBuilder();
+                                                for (int j = 0; j < epcLen; j++)
+                                                {
+                                                    epcStr.Append($"{epcData[offset + j]:X2}");
+                                                }
+
+                                                string tagEpc = epcStr.ToString();
+                                                allTagsFound.Add(tagEpc);
+                                                offset += epcLen;
                                             }
-
-                                            string tagEpc = epcStr.ToString();
-
-                                            Console.WriteLine($"  TAG: {tagEpc}");
-
-                                            offset += epcLen;
                                         }
                                     }
+
+                                    Console.WriteLine($"  Attempt {attempt}: Found {cardNum} tag(s) (Total unique: {allTagsFound.Count})");
+                                    
+                                    // Update statistics
+                                    if (scanStats.ContainsKey(cardNum))
+                                        scanStats[cardNum]++;
+                                    else
+                                        scanStats[cardNum] = 1;
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"  Attempt {attempt}: No tags detected");
+                                    
+                                    // Update statistics for 0 tags
+                                    if (scanStats.ContainsKey(0))
+                                        scanStats[0]++;
+                                    else
+                                        scanStats[0] = 1;
                                 }
                             }
                             else
                             {
-                                Console.WriteLine("No tags detected in range");
+                                Console.WriteLine($"  Attempt {attempt}: Scan failed. Error code: 0x{result:X2}");
+                                
+                                // Update statistics for failed scan (treat as 0 tags)
+                                if (scanStats.ContainsKey(0))
+                                    scanStats[0]++;
+                                else
+                                    scanStats[0] = 1;
                             }
+
+                            // Check for user input to stop scanning
+                            if (Console.KeyAvailable)
+                            {
+                                ConsoleKeyInfo stopKey = Console.ReadKey(true);
+                                if (stopKey.Key == ConsoleKey.S)
+                                {
+                                    stopScan = true;
+                                    Console.WriteLine("\nScan stopped by user");
+                                    break;
+                                }
+                            }
+
+                            Thread.Sleep(attemptDelay);
+                            attempt++;
                         }
-                        else
+
+                        Console.WriteLine($"\nFinal Results - Total unique tags found: {allTagsFound.Count}");
+                        int tagIndex = 1;
+                        foreach (string tagEpc in allTagsFound)
                         {
-                            Console.WriteLine($"Scan failed. Error code: 0x{result:X2}");
-                            PrintErrorDescription(result);
+                            if (!scannedTags.Contains(tagEpc))
+                            {
+                                scannedTags.Add(tagEpc);
+                                Console.WriteLine($"  NEW TAG {tagIndex}: {tagEpc}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"  Present Tag {tagIndex}: {tagEpc}");
+                            }
+                            tagIndex++;
+                        }
+
+                        if (allTagsFound.Count == 0)
+                        {
+                            Console.WriteLine("No tags detected in range after all attempts");
+                        }
+
+                        // Display scan statistics
+                        Console.WriteLine("\n=== Scan Statistics ===");
+                        Console.WriteLine("Per-attempt detection counts:");
+                        var sortedStats = scanStats.OrderBy(kv => kv.Key);
+                        int maxPerScan = sortedStats.Any() ? sortedStats.Max(kv => kv.Key) : 0;
+                        
+                        foreach (var stat in sortedStats)
+                        {
+                            double percentage = (double)stat.Value / (attempt - 1) * 100;
+                            Console.WriteLine($"  {stat.Key} tags found: {stat.Value} times ({percentage:F1}%)");
+                        }
+                        
+                        Console.WriteLine($"Total scan attempts: {attempt - 1}");
+                        Console.WriteLine($"Max tags in single scan: {maxPerScan}");
+                        Console.WriteLine($"Total unique tags found: {allTagsFound.Count}");
+                        
+                        if (allTagsFound.Count > maxPerScan)
+                        {
+                            Console.WriteLine($"Note: {allTagsFound.Count - maxPerScan} additional tag(s) found across multiple scans");
                         }
                     }
                     catch (Exception ex)
