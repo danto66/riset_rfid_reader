@@ -6,7 +6,7 @@ namespace ConsoleApp
     internal class Reader
     {
         private int frmHandle = -1;
-        private const string IP_ADDRESS = "192.168.1.190";
+        private const string IP_ADDRESS = "192.168.1.192";
         private const int PORT = 6000;
         private byte comAddr = 0x00;
 
@@ -20,8 +20,6 @@ namespace ConsoleApp
                 {
                     Console.WriteLine($"Successfully connected to RFID reader at {IP_ADDRESS}:{PORT}");
                     Console.WriteLine($"Handle: {frmHandle}, Address: 0x{comAddr:X2}");
-
-                    SetScanTime();
 
                     return true;
                 }
@@ -67,22 +65,29 @@ namespace ConsoleApp
 
         public void SetScanTime(byte scanTime = 50)
         {
-            try
-            {
-                int result = StaticClassReaderB.WriteScanTime(ref comAddr, ref scanTime, frmHandle);
+            int result = StaticClassReaderB.WriteScanTime(ref comAddr, ref scanTime, frmHandle);
 
-                if (result == 0)
-                {
-                    Console.WriteLine($"Scan time set to: {scanTime} * 100ms");
-                }
-                else
-                {
-                    Console.WriteLine("Could not set scan time");
-                }
-            }
-            catch (Exception ex)
+            if (result == 0)
             {
-                Console.WriteLine($"Note: Could not set scan time: {ex.Message}");
+                Console.WriteLine($"Scan time set to: {scanTime} * 100ms");
+            }
+            else
+            {
+                Console.WriteLine("Could not set scan time");
+            }
+        }
+
+        public void SetFrequency(byte dminfre = 51, byte dmaxfre = 56) // default indonesia
+        {
+            int result = StaticClassReaderB.Writedfre(ref comAddr, ref dmaxfre, ref dminfre, frmHandle);
+
+            if (result == 0)
+            {
+                Console.WriteLine("Successfully set the frequency for Indonesia.");
+            }
+            else
+            {
+                Console.WriteLine("Failed to set frequency. Error code: " + result);
             }
         }
 
@@ -330,11 +335,12 @@ namespace ConsoleApp
                         scanStats.Clear(); // Reset statistics for new scan
                         int attemptDelay = 200;
                         int attempt = 1;
+                        int attemptMax = 50;
                         bool stopScan = false;
 
                         Console.WriteLine("Scanning started... Press 's' to stop scanning");
 
-                        while (!stopScan)
+                        while (!stopScan && attempt <= attemptMax)
                         {
                             byte[] epcData = new byte[1000];
                             int totalLen = 0;
@@ -370,7 +376,7 @@ namespace ConsoleApp
                                     }
 
                                     Console.WriteLine($"  Attempt {attempt}: Found {cardNum} tag(s) (Total unique: {allTagsFound.Count})");
-                                    
+
                                     // Update statistics
                                     if (scanStats.ContainsKey(cardNum))
                                         scanStats[cardNum]++;
@@ -380,7 +386,7 @@ namespace ConsoleApp
                                 else
                                 {
                                     Console.WriteLine($"  Attempt {attempt}: No tags detected");
-                                    
+
                                     // Update statistics for 0 tags
                                     if (scanStats.ContainsKey(0))
                                         scanStats[0]++;
@@ -391,7 +397,7 @@ namespace ConsoleApp
                             else
                             {
                                 Console.WriteLine($"  Attempt {attempt}: Scan failed. Error code: 0x{result:X2}");
-                                
+
                                 // Update statistics for failed scan (treat as 0 tags)
                                 if (scanStats.ContainsKey(0))
                                     scanStats[0]++;
@@ -441,17 +447,17 @@ namespace ConsoleApp
                         Console.WriteLine("Per-attempt detection counts:");
                         var sortedStats = scanStats.OrderBy(kv => kv.Key);
                         int maxPerScan = sortedStats.Any() ? sortedStats.Max(kv => kv.Key) : 0;
-                        
+
                         foreach (var stat in sortedStats)
                         {
                             double percentage = (double)stat.Value / (attempt - 1) * 100;
                             Console.WriteLine($"  {stat.Key} tags found: {stat.Value} times ({percentage:F1}%)");
                         }
-                        
+
                         Console.WriteLine($"Total scan attempts: {attempt - 1}");
                         Console.WriteLine($"Max tags in single scan: {maxPerScan}");
                         Console.WriteLine($"Total unique tags found: {allTagsFound.Count}");
-                        
+
                         if (allTagsFound.Count > maxPerScan)
                         {
                             Console.WriteLine($"Note: {allTagsFound.Count - maxPerScan} additional tag(s) found across multiple scans");

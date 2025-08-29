@@ -13,6 +13,9 @@ class Program
         {
             try
             {
+                reader.SetScanTime();
+                reader.SetFrequency();
+
                 while (true)
                 {
                     Console.WriteLine("\n**************************");
